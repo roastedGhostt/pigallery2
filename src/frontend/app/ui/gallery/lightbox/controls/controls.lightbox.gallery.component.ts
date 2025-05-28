@@ -163,9 +163,11 @@ export class ControlsLightboxComponent implements OnDestroy, OnInit, OnChanges {
       return;
     }
     if ($event.deltaY < 0) {
-      this.zoomIn();
-    } else if ($event.deltaY > 0) {
-      this.zoomOut();
+      this.previousPhoto.emit();
+    } else {
+      if (this.navigation.hasPrev) {
+        this.nextPhoto.emit();
+      }
     }
   }
 
