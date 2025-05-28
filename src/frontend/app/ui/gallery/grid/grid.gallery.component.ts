@@ -54,9 +54,9 @@ export class GalleryGridComponent
   };
   delayedRenderUpToPhoto: string = null;
   private scrollListenerPhotos: GalleryPhotoComponent[] = [];
-  private TARGET_COL_COUNT = 5;
-  private MIN_ROW_COUNT = 2;
-  private MAX_ROW_COUNT = 5;
+  private TARGET_COL_COUNT = 1;
+  private MIN_ROW_COUNT = 1;
+  private MAX_ROW_COUNT = 3;
   public IMAGE_MARGIN = 2;
   private onScrollFired = false;
   private helperTime: number = null;
@@ -378,7 +378,8 @@ export class GalleryGridComponent
   }
 
   private getMaxRowHeight(): number {
-    return this.screenHeight / this.MIN_ROW_COUNT;
+    const rowCount = this.screenHeight > this.containerWidth ? 0 : this.MIN_ROW_COUNT;
+    return this.screenHeight / rowCount;
   }
 
   /**
