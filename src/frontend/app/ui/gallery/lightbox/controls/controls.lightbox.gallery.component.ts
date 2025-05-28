@@ -165,7 +165,7 @@ export class ControlsLightboxComponent implements OnDestroy, OnInit, OnChanges {
     if ($event.deltaY < 0) {
       this.previousPhoto.emit();
     } else {
-      if (this.navigation.hasPrev) {
+      if (this.navigation.hasNext) {
         this.nextPhoto.emit();
       }
     }
