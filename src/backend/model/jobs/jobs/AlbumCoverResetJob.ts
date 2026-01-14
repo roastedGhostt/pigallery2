@@ -8,6 +8,11 @@ export class AlbumCoverRestJob extends Job {
   public readonly ConfigTemplate: DynamicConfig[] = null;
   protected readonly IsInstant = true;
 
+
+  get LOG_TAG(): string {
+    return '[AlbumCoverRestJob]';
+  }
+
   public get Supported(): boolean {
     return true;
   }
@@ -20,8 +25,8 @@ export class AlbumCoverRestJob extends Job {
     this.Progress.Left = 1;
     this.Progress.Processed++;
     await ObjectManagers.getInstance().CoverManager.resetCovers();
-    await ObjectManagers.getInstance().AlbumManager.resetCovers();
-    await ObjectManagers.getInstance().PersonManager.resetPreviews();
+    await ObjectManagers.getInstance().AlbumManager.invalidateCache();
+    await ObjectManagers.getInstance().PersonManager.invalidateCache();
     return false;
   }
 }

@@ -1,5 +1,5 @@
 import {BenchmarkResult} from './BenchmarkRunner';
-import {ContentWrapper} from '../src/common/entities/ConentWrapper';
+import {ContentWrapper} from '../src/common/entities/ContentWrapper';
 import {Express, NextFunction} from 'express';
 import {Utils} from '../src/common/Utils';
 import {Message} from '../src/common/entities/Message';
@@ -157,11 +157,11 @@ export class Benchmark {
         };
       }
 
-      if (output instanceof ContentWrapper) {
+      if ((output as ContentWrapper).directory || (output as ContentWrapper).searchResult || (output as ContentWrapper).notModified) {
         return {
           name,
           duration: null,
-          contentWrapper: output
+          contentWrapper: output as ContentWrapper
         };
       }
       if (output instanceof Message) {
@@ -174,11 +174,11 @@ export class Benchmark {
           };
         }
 
-        if (msg instanceof ContentWrapper) {
+        if ((msg as ContentWrapper).directory || (msg as ContentWrapper).searchResult || (msg as ContentWrapper).notModified) {
           return {
             name,
             duration: null,
-            contentWrapper: msg
+            contentWrapper: msg as ContentWrapper
           };
         }
       }

@@ -10,6 +10,7 @@ import {MediaDTOUtils} from '../../../../common/entities/MediaDTO';
 import {DynamicConfig} from '../../../../common/entities/DynamicConfig';
 import {MessengerRepository} from '../../messenger/MessengerRepository';
 import {Utils} from '../../../../common/Utils';
+import {SessionContext} from '../../SessionContext';
 
 
 export class TopPickSendJob extends Job<{
@@ -62,6 +63,10 @@ export class TopPickSendJob extends Job<{
         }));
   }
 
+  get LOG_TAG(): string {
+    return '[TopPickSendJob]';
+  }
+
 
   protected async init(): Promise<void> {
     this.status = 'Listing';
@@ -88,8 +93,13 @@ export class TopPickSendJob extends Job<{
     this.Progress.log('Collecting Photos and videos to Send.');
     this.mediaList = [];
     for (let i = 0; i < this.config.mediaPick.length; ++i) {
+      let session = new SessionContext();
+      if (this.config.mediaPick[i].creatorId) {
+        const u = await ObjectManagers.getInstance().UserManager.findOne({id: this.config.mediaPick[i].creatorId});
+        session = await ObjectManagers.getInstance().SessionManager.buildContext(u);
+      }
       const media = await ObjectManagers.getInstance().SearchManager
-        .getNMedia(this.config.mediaPick[i].searchQuery, this.config.mediaPick[i].sortBy, this.config.mediaPick[i].pick);
+        .getNMedia(session, this.config.mediaPick[i].searchQuery, this.config.mediaPick[i].sortBy, this.config.mediaPick[i].pick);
       this.Progress.log('Find ' + media.length + ' photos and videos from ' + (i + 1) + '. load');
       this.mediaList = this.mediaList.concat(media);
     }

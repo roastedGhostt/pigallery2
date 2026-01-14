@@ -5,7 +5,7 @@ import {SQLConnection} from './SQLConnection';
 import {PhotoEntity} from './enitites/PhotoEntity';
 import {DirectoryEntity} from './enitites/DirectoryEntity';
 import {MediaEntity} from './enitites/MediaEntity';
-import {PersonEntry} from './enitites/PersonEntry';
+import {PersonEntry} from './enitites/person/PersonEntry';
 import {Brackets, SelectQueryBuilder, WhereExpression} from 'typeorm';
 import {Config} from '../../../common/config/private/Config';
 import {
@@ -13,22 +13,16 @@ import {
   DatePatternFrequency,
   DatePatternSearch,
   DistanceSearch,
-  FromDateSearch,
-  MaxPersonCountSearch,
-  MaxRatingSearch,
-  MaxResolutionSearch,
-  MinPersonCountSearch,
-  MinRatingSearch,
-  MinResolutionSearch,
+  NegatableSearchQuery,
   OrientationSearch,
   ORSearchQuery,
+  RangeSearch,
   SearchListQuery,
   SearchQueryDTO,
   SearchQueryTypes,
   SomeOfSearchQuery,
   TextSearch,
-  TextSearchQueryMatchTypes,
-  ToDateSearch,
+  TextSearchQueryMatchTypes, TextSearchQueryTypes,
 } from '../../../common/entities/SearchQueryDTO';
 import {GalleryManager} from './GalleryManager';
 import {ObjectManagers} from '../ObjectManagers';
@@ -37,6 +31,7 @@ import {Utils} from '../../../common/Utils';
 import {FileEntity} from './enitites/FileEntity';
 import {SQL_COLLATE} from './enitites/EntityUtils';
 import {GroupSortByTypes, SortByTypes, SortingMethod} from '../../../common/entities/SortingMethods';
+import {SessionContext} from '../SessionContext';
 
 export class SearchManager {
   private DIRECTORY_SELECT = [
@@ -46,310 +41,6 @@ export class SearchManager {
   ];
   // makes all search query params unique, so typeorm won't mix them
   private queryIdBase = 0;
-
-  private static autoCompleteItemsUnique(
-    array: Array<AutoCompleteItem>
-  ): Array<AutoCompleteItem> {
-    const a = array.concat();
-    for (let i = 0; i < a.length; ++i) {
-      for (let j = i + 1; j < a.length; ++j) {
-        if (a[i].equals(a[j])) {
-          a.splice(j--, 1);
-        }
-      }
-    }
-
-    return a;
-  }
-
-  async autocomplete(
-    text: string,
-    type: SearchQueryTypes
-  ): Promise<AutoCompleteItem[]> {
-    const connection = await SQLConnection.getConnection();
-
-    const photoRepository = connection.getRepository(PhotoEntity);
-    const mediaRepository = connection.getRepository(MediaEntity);
-    const personRepository = connection.getRepository(PersonEntry);
-    const directoryRepository = connection.getRepository(DirectoryEntity);
-
-    const partialResult: AutoCompleteItem[][] = [];
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.keyword
-    ) {
-      const acList: AutoCompleteItem[] = [];
-      (
-        await photoRepository
-          .createQueryBuilder('photo')
-          .select('DISTINCT(photo.metadata.keywords)')
-          .where('photo.metadata.keywords LIKE :text COLLATE ' + SQL_COLLATE, {
-            text: '%' + text + '%',
-          })
-          .limit(Config.Search.AutoComplete.ItemsPerCategory.keyword)
-          .getRawMany()
-      )
-        .map(
-          (r): Array<string> =>
-            (r.metadataKeywords as string).split(',') as Array<string>
-        )
-        .forEach((keywords): void => {
-          acList.push(
-            ...this.encapsulateAutoComplete(
-              keywords.filter(
-                (k): boolean =>
-                  k.toLowerCase().indexOf(text.toLowerCase()) !== -1
-              ),
-              SearchQueryTypes.keyword
-            )
-          );
-        });
-      partialResult.push(acList);
-    }
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.person
-    ) {
-      partialResult.push(
-        this.encapsulateAutoComplete(
-          (
-            await personRepository
-              .createQueryBuilder('person')
-              .select('DISTINCT(person.name), person.count')
-              .where('person.name LIKE :text COLLATE ' + SQL_COLLATE, {
-                text: '%' + text + '%',
-              })
-              .limit(
-                Config.Search.AutoComplete.ItemsPerCategory.person
-              )
-              .orderBy('person.count', 'DESC')
-              .getRawMany()
-          ).map((r) => r.name),
-          SearchQueryTypes.person
-        )
-      );
-    }
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.position ||
-      type === SearchQueryTypes.distance
-    ) {
-      const acList: AutoCompleteItem[] = [];
-      (
-        await photoRepository
-          .createQueryBuilder('photo')
-          .select(
-            'photo.metadata.positionData.country as country, ' +
-            'photo.metadata.positionData.state as state, photo.metadata.positionData.city as city'
-          )
-          .where(
-            'photo.metadata.positionData.country LIKE :text COLLATE ' +
-            SQL_COLLATE,
-            {text: '%' + text + '%'}
-          )
-          .orWhere(
-            'photo.metadata.positionData.state LIKE :text COLLATE ' +
-            SQL_COLLATE,
-            {text: '%' + text + '%'}
-          )
-          .orWhere(
-            'photo.metadata.positionData.city LIKE :text COLLATE ' +
-            SQL_COLLATE,
-            {text: '%' + text + '%'}
-          )
-          .groupBy(
-            'photo.metadata.positionData.country, photo.metadata.positionData.state, photo.metadata.positionData.city'
-          )
-          .limit(Config.Search.AutoComplete.ItemsPerCategory.position)
-          .getRawMany()
-      )
-        .filter((pm): boolean => !!pm)
-        .map(
-          (pm): Array<string> =>
-            [pm.city || '', pm.country || '', pm.state || ''] as Array<string>
-        )
-        .forEach((positions): void => {
-          acList.push(
-            ...this.encapsulateAutoComplete(
-              positions.filter(
-                (p): boolean =>
-                  p.toLowerCase().indexOf(text.toLowerCase()) !== -1
-              ),
-              type === SearchQueryTypes.distance
-                ? type
-                : SearchQueryTypes.position
-            )
-          );
-        });
-      partialResult.push(acList);
-    }
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.file_name
-    ) {
-      partialResult.push(
-        this.encapsulateAutoComplete(
-          (
-            await mediaRepository
-              .createQueryBuilder('media')
-              .select('DISTINCT(media.name)')
-              .where('media.name LIKE :text COLLATE ' + SQL_COLLATE, {
-                text: '%' + text + '%',
-              })
-              .limit(
-                Config.Search.AutoComplete.ItemsPerCategory.fileName
-              )
-              .getRawMany()
-          ).map((r) => r.name),
-          SearchQueryTypes.file_name
-        )
-      );
-    }
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.caption
-    ) {
-      partialResult.push(
-        this.encapsulateAutoComplete(
-          (
-            await photoRepository
-              .createQueryBuilder('media')
-              .select('DISTINCT(media.metadata.caption) as caption')
-              .where(
-                'media.metadata.caption LIKE :text COLLATE ' + SQL_COLLATE,
-                {text: '%' + text + '%'}
-              )
-              .limit(
-                Config.Search.AutoComplete.ItemsPerCategory.caption
-              )
-              .getRawMany()
-          ).map((r) => r.caption),
-          SearchQueryTypes.caption
-        )
-      );
-    }
-
-    if (
-      type === SearchQueryTypes.any_text ||
-      type === SearchQueryTypes.directory
-    ) {
-      partialResult.push(
-        this.encapsulateAutoComplete(
-          (
-            await directoryRepository
-              .createQueryBuilder('dir')
-              .select('DISTINCT(dir.name)')
-              .where('dir.name LIKE :text COLLATE ' + SQL_COLLATE, {
-                text: '%' + text + '%',
-              })
-              .limit(
-                Config.Search.AutoComplete.ItemsPerCategory.directory
-              )
-              .getRawMany()
-          ).map((r) => r.name),
-          SearchQueryTypes.directory
-        )
-      );
-    }
-
-    const result: AutoCompleteItem[] = [];
-
-    while (result.length < Config.Search.AutoComplete.ItemsPerCategory.maxItems) {
-      let adding = false;
-      for (let i = 0; i < partialResult.length; ++i) {
-        if (partialResult[i].length <= 0) {
-          continue;
-        }
-        result.push(partialResult[i].pop());
-        adding = true;
-      }
-      if (!adding) {
-        break;
-      }
-    }
-
-
-    return SearchManager.autoCompleteItemsUnique(result);
-  }
-
-  async search(queryIN: SearchQueryDTO): Promise<SearchResultDTO> {
-    const query = await this.prepareQuery(queryIN);
-    const connection = await SQLConnection.getConnection();
-
-    const result: SearchResultDTO = {
-      searchQuery: queryIN,
-      directories: [],
-      media: [],
-      metaFile: [],
-      resultOverflow: false,
-    };
-
-    result.media = await connection
-      .getRepository(MediaEntity)
-      .createQueryBuilder('media')
-      .select(['media', ...this.DIRECTORY_SELECT])
-      .where(this.buildWhereQuery(query))
-      .leftJoin('media.directory', 'directory')
-      .limit(Config.Search.maxMediaResult + 1)
-      .getMany();
-
-
-    if (result.media.length > Config.Search.maxMediaResult) {
-      result.resultOverflow = true;
-    }
-
-
-    if (Config.Search.listMetafiles === true) {
-      const dIds = Array.from(new Set(result.media.map(m => (m.directory as unknown as { id: number }).id)));
-      result.metaFile = await connection
-        .getRepository(FileEntity)
-        .createQueryBuilder('file')
-        .select(['file', ...this.DIRECTORY_SELECT])
-        .where(`file.directoryId IN(${dIds})`)
-        .leftJoin('file.directory', 'directory')
-        .getMany();
-    }
-
-    if (Config.Search.listDirectories === true) {
-      const dirQuery = this.filterDirectoryQuery(query);
-      if (dirQuery !== null) {
-        result.directories = await connection
-          .getRepository(DirectoryEntity)
-          .createQueryBuilder('directory')
-          .where(this.buildWhereQuery(dirQuery, true))
-          .leftJoinAndSelect('directory.cover', 'cover')
-          .leftJoinAndSelect('cover.directory', 'coverDirectory')
-          .limit(Config.Search.maxDirectoryResult + 1)
-          .select([
-            'directory',
-            'cover.name',
-            'coverDirectory.name',
-            'coverDirectory.path',
-          ])
-          .getMany();
-
-        // setting covers
-        if (result.directories) {
-          for (const item of result.directories) {
-            await ObjectManagers.getInstance().GalleryManager.fillCoverForSubDir(connection, item as DirectoryEntity);
-          }
-        }
-        if (
-          result.directories.length > Config.Search.maxDirectoryResult
-        ) {
-          result.resultOverflow = true;
-        }
-      }
-    }
-
-    return result;
-  }
-
 
   public static setSorting<T>(
     query: SelectQueryBuilder<T>,
@@ -367,7 +58,7 @@ export class SearchManager {
           if (Config.Gallery.ignoreTimestampOffset === true) {
             query.addOrderBy('media.metadata.creationDate + (coalesce(media.metadata.creationDateOffset,0) * 60000)', sort.ascending ? 'ASC' : 'DESC');
           } else {
-            query.addOrderBy('media.metadata.creationDate', sort.ascending ? 'ASC' : 'DESC'); 
+            query.addOrderBy('media.metadata.creationDate', sort.ascending ? 'ASC' : 'DESC');
           }
           break;
         case SortByTypes.Rating:
@@ -395,7 +86,367 @@ export class SearchManager {
     return query;
   }
 
-  public async getNMedia(query: SearchQueryDTO, sortings: SortingMethod[], take: number, photoOnly = false) {
+  private static autoCompleteItemsUnique(
+    array: Array<AutoCompleteItem>
+  ): Array<AutoCompleteItem> {
+    const a = array.concat();
+    for (let i = 0; i < a.length; ++i) {
+      for (let j = i + 1; j < a.length; ++j) {
+        if (a[i].equals(a[j])) {
+          a.splice(j--, 1);
+        }
+      }
+    }
+
+    return a;
+  }
+
+  async autocomplete(
+    session: SessionContext,
+    value: string,
+    type: SearchQueryTypes
+  ): Promise<AutoCompleteItem[]> {
+    const connection = await SQLConnection.getConnection();
+
+    const photoRepository = connection.getRepository(PhotoEntity);
+    const mediaRepository = connection.getRepository(MediaEntity);
+    const personRepository = connection.getRepository(PersonEntry);
+    const directoryRepository = connection.getRepository(DirectoryEntity);
+
+    const partialResult: AutoCompleteItem[][] = [];
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.keyword
+    ) {
+      const acList: AutoCompleteItem[] = [];
+      const q = photoRepository
+        .createQueryBuilder('media')
+        .select('DISTINCT(media.metadata.keywords)')
+        .where('media.metadata.keywords LIKE :valueKW COLLATE ' + SQL_COLLATE, {
+          valueKW: '%' + value + '%',
+        });
+
+      if (session.projectionQuery) {
+        if (session.hasDirectoryProjection) {
+          q.leftJoin('media.directory', 'directory');
+        }
+        q.andWhere(session.projectionQuery);
+      }
+
+      q.limit(Config.Search.AutoComplete.ItemsPerCategory.keyword);
+      (await q.getRawMany())
+        .map(
+          (r): Array<string> =>
+            (r.metadataKeywords as string).split(',') as Array<string>
+        )
+        .forEach((keywords): void => {
+          acList.push(
+            ...this.encapsulateAutoComplete(
+              keywords.filter(
+                (k): boolean =>
+                  k.toLowerCase().indexOf(value.toLowerCase()) !== -1
+              ),
+              SearchQueryTypes.keyword
+            )
+          );
+        });
+      partialResult.push(acList);
+    }
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.person
+    ) {
+      // make sure all persons have up-to-date cache
+      await ObjectManagers.getInstance().PersonManager.getAll(session);
+      partialResult.push(
+        this.encapsulateAutoComplete(
+          (
+            await personRepository
+              .createQueryBuilder('person')
+              .select('DISTINCT(person.name), cache.count')
+              .leftJoin('person.cache', 'cache', 'cache.projectionKey = :pk', {pk: session.user.projectionKey})
+              .where('person.name LIKE :value COLLATE ' + SQL_COLLATE, {
+                value: '%' + value + '%',
+              })
+              .andWhere('cache.count > 0 AND cache.valid = 1')
+              .limit(
+                Config.Search.AutoComplete.ItemsPerCategory.person
+              )
+              .orderBy('cache.count', 'DESC')
+              .getRawMany()
+          ).map((r) => r.name),
+          SearchQueryTypes.person
+        )
+      );
+    }
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.position ||
+      type === SearchQueryTypes.distance
+    ) {
+      const acList: AutoCompleteItem[] = [];
+      const q = photoRepository
+        .createQueryBuilder('media')
+        .select(
+          'media.metadata.positionData.country as country, ' +
+          'media.metadata.positionData.state as state, media.metadata.positionData.city as city'
+        );
+      const b = new Brackets((q) => {
+        q.where(
+          'media.metadata.positionData.country LIKE :value COLLATE ' +
+          SQL_COLLATE,
+          {value: '%' + value + '%'}
+        ).orWhere(
+          'media.metadata.positionData.state LIKE :value COLLATE ' +
+          SQL_COLLATE,
+          {value: '%' + value + '%'}
+        ).orWhere(
+          'media.metadata.positionData.city LIKE :value COLLATE ' +
+          SQL_COLLATE,
+          {value: '%' + value + '%'}
+        );
+      });
+      q.where(b);
+
+      if (session.projectionQuery) {
+        if (session.hasDirectoryProjection) {
+          q.leftJoin('media.directory', 'directory');
+        }
+        q.andWhere(session.projectionQuery);
+      }
+
+      q.groupBy(
+        'media.metadata.positionData.country, media.metadata.positionData.state, media.metadata.positionData.city'
+      )
+        .limit(Config.Search.AutoComplete.ItemsPerCategory.position);
+      (
+
+        await q.getRawMany()
+      )
+        .filter((pm): boolean => !!pm)
+        .map(
+          (pm): Array<string> =>
+            [pm.city || '', pm.country || '', pm.state || ''] as Array<string>
+        )
+        .forEach((positions): void => {
+          acList.push(
+            ...this.encapsulateAutoComplete(
+              positions.filter(
+                (p): boolean =>
+                  p.toLowerCase().indexOf(value.toLowerCase()) !== -1
+              ),
+              type === SearchQueryTypes.distance
+                ? type
+                : SearchQueryTypes.position
+            )
+          );
+        });
+      partialResult.push(acList);
+    }
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.file_name
+    ) {
+      const q = mediaRepository
+        .createQueryBuilder('media')
+        .select('DISTINCT(media.name)')
+        .where('media.name LIKE :value COLLATE ' + SQL_COLLATE, {
+          value: '%' + value + '%',
+        });
+
+
+      if (session.projectionQuery) {
+        if (session.hasDirectoryProjection) {
+          q.leftJoin('media.directory', 'directory');
+        }
+        q.andWhere(session.projectionQuery);
+      }
+      q.limit(
+        Config.Search.AutoComplete.ItemsPerCategory.fileName
+      );
+      partialResult.push(
+        this.encapsulateAutoComplete(
+          (
+            await q.getRawMany()
+          ).map((r) => r.name),
+          SearchQueryTypes.file_name
+        )
+      );
+    }
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.caption
+    ) {
+      const q = photoRepository
+        .createQueryBuilder('media')
+        .select('DISTINCT(media.metadata.caption) as caption')
+        .where(
+          'media.metadata.caption LIKE :value COLLATE ' + SQL_COLLATE,
+          {value: '%' + value + '%'}
+        );
+
+      if (session.projectionQuery) {
+        if (session.hasDirectoryProjection) {
+          q.leftJoin('media.directory', 'directory');
+        }
+        q.andWhere(session.projectionQuery);
+      }
+      q.limit(
+        Config.Search.AutoComplete.ItemsPerCategory.caption
+      );
+      partialResult.push(
+        this.encapsulateAutoComplete(
+          (
+            await q.getRawMany()
+          ).map((r) => r.caption),
+          SearchQueryTypes.caption
+        )
+      );
+    }
+
+    if (
+      type === SearchQueryTypes.any_text ||
+      type === SearchQueryTypes.directory
+    ) {
+      const dirs = await directoryRepository
+        .createQueryBuilder('directory')
+        .leftJoinAndSelect('directory.cache', 'cache', 'cache.projectionKey = :pk AND cache.valid = 1', {pk: session.user.projectionKey})
+        .where('directory.name LIKE :value COLLATE ' + SQL_COLLATE, {
+          value: '%' + value + '%',
+        })
+        .andWhere('(cache.recursiveMediaCount > 0 OR cache.id is NULL)')
+        .limit(
+          Config.Search.AutoComplete.ItemsPerCategory.directory
+        )
+        .getMany();
+      // fill cache as we need it for this autocomplete search
+      for (const dir of dirs) {
+        if (!dir.cache?.valid) {
+          dir.cache = await ObjectManagers.getInstance().ProjectedCacheManager.setAndGetCacheForDirectory(connection, session, dir);
+        }
+      }
+      partialResult.push(
+        this.encapsulateAutoComplete(
+          dirs.filter(d => d.cache.valid && d.cache.recursiveMediaCount > 0).map((r) => r.name),
+          SearchQueryTypes.directory
+        )
+      );
+    }
+
+    const result: AutoCompleteItem[] = [];
+
+    while (result.length < Config.Search.AutoComplete.ItemsPerCategory.maxItems) {
+      let adding = false;
+      for (let i = 0; i < partialResult.length; ++i) {
+        if (partialResult[i].length <= 0) {
+          continue;
+        }
+        result.push(partialResult[i].shift()); // first elements are more important
+        adding = true;
+      }
+      if (!adding) {
+        break;
+      }
+    }
+
+
+    return SearchManager.autoCompleteItemsUnique(result);
+  }
+
+  async search(session: SessionContext, queryIN: SearchQueryDTO): Promise<SearchResultDTO> {
+    const query = await this.prepareQuery(queryIN);
+    const connection = await SQLConnection.getConnection();
+
+    const result: SearchResultDTO = {
+      searchQuery: queryIN,
+      directories: [],
+      media: [],
+      metaFile: [],
+      resultOverflow: false,
+    };
+
+    const q = connection
+      .getRepository(MediaEntity)
+      .createQueryBuilder('media')
+      .select(['media', ...this.DIRECTORY_SELECT])
+      .where(this.buildWhereQuery(query))
+      .leftJoin('media.directory', 'directory')
+      .limit(Config.Search.maxMediaResult + 1);
+
+    if (session.projectionQuery) {
+      q.andWhere(session.projectionQuery);
+    }
+
+    result.media = await q.getMany();
+
+    if (result.media.length > Config.Search.maxMediaResult) {
+      result.resultOverflow = true;
+    }
+
+
+    if (Config.Search.listMetafiles === true) {
+      const dIds = Array.from(new Set(result.media.map(m => (m.directory as unknown as { id: number }).id)));
+      result.metaFile = [];
+      if (dIds.length > 0) {
+        result.metaFile = await connection
+          .getRepository(FileEntity)
+          .createQueryBuilder('file')
+          .select(['file', ...this.DIRECTORY_SELECT])
+          .where(`file.directoryId IN(${dIds})`)
+          .leftJoin('file.directory', 'directory')
+          .getMany();
+      }
+    }
+
+    if (Config.Search.listDirectories === true) {
+      const dirQuery = this.filterDirectoryQuery(query);
+      if (dirQuery !== null) {
+        result.directories = await connection
+          .getRepository(DirectoryEntity)
+          .createQueryBuilder('directory')
+          .where(this.buildWhereQuery(dirQuery, true))
+          .leftJoin('directory.cache', 'cache', 'cache.projectionKey = :pk AND cache.valid = 1', {pk: session.user.projectionKey})
+          .leftJoin('cache.cover', 'cover')
+          .leftJoin('cover.directory', 'coverDirectory')
+          .limit(Config.Search.maxDirectoryResult + 1)
+          .select([
+            'directory',
+            'cache.valid',
+            'cache.oldestMedia',
+            'cache.youngestMedia',
+            'cache.mediaCount',
+            'cache.recursiveMediaCount',
+            'cover.name',
+            'coverDirectory.name',
+            'coverDirectory.path',
+          ])
+          .getMany();
+
+        // setting covers
+        if (result.directories) {
+          for (const item of result.directories) {
+            await ObjectManagers.getInstance().GalleryManager.fillCacheForSubDir(connection, session, item as DirectoryEntity);
+          }
+        }
+        // do not show empty directories in search results
+        result.directories = result.directories.filter(d => d.cache.recursiveMediaCount > 0);
+        if (
+          result.directories.length > Config.Search.maxDirectoryResult
+        ) {
+          result.resultOverflow = true;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  public async getNMedia(session: SessionContext, query: SearchQueryDTO, sortings: SortingMethod[], take: number, photoOnly = false) {
     const connection = await SQLConnection.getConnection();
     const sqlQuery: SelectQueryBuilder<PhotoEntity> = connection
       .getRepository(photoOnly ? PhotoEntity : MediaEntity)
@@ -403,29 +454,38 @@ export class SearchManager {
       .select(['media', ...this.DIRECTORY_SELECT])
       .innerJoin('media.directory', 'directory')
       .where(await this.prepareAndBuildWhereQuery(query));
+
+    if (session.projectionQuery) {
+      sqlQuery.andWhere(session.projectionQuery);
+    }
     SearchManager.setSorting(sqlQuery, sortings);
 
     return sqlQuery.limit(take).getMany();
 
   }
 
-  public async getCount(query: SearchQueryDTO): Promise<number> {
+  public async getCount(session: SessionContext, query: SearchQueryDTO): Promise<number> {
     const connection = await SQLConnection.getConnection();
 
-    return await connection
+    const q = connection
       .getRepository(MediaEntity)
       .createQueryBuilder('media')
       .innerJoin('media.directory', 'directory')
-      .where(await this.prepareAndBuildWhereQuery(query))
-      .getCount();
+      .where(await this.prepareAndBuildWhereQuery(query));
+    if (session.projectionQuery) {
+      q.andWhere(session.projectionQuery);
+    }
+    return await q.getCount();
   }
 
   public async prepareAndBuildWhereQuery(
-    queryIN: SearchQueryDTO,
-    directoryOnly = false
-  ): Promise<Brackets> {
-    const query = await this.prepareQuery(queryIN);
-    return this.buildWhereQuery(query, directoryOnly);
+    queryIN: SearchQueryDTO, directoryOnly = false,
+    aliases: { [key: string]: string } = {}): Promise<Brackets> {
+    let query = await this.prepareQuery(queryIN);
+    if (directoryOnly) {
+      query = this.filterDirectoryQuery(query);
+    }
+    return this.buildWhereQuery(query, directoryOnly, aliases);
   }
 
   public async prepareQuery(queryIN: SearchQueryDTO): Promise<SearchQueryDTO> {
@@ -439,11 +499,13 @@ export class SearchManager {
    * Builds the SQL Where query from search query
    * @param query input search query
    * @param directoryOnly Only builds directory related queries
+   * @param aliases for SQL alias mapping
    * @private
    */
   public buildWhereQuery(
     query: SearchQueryDTO,
-    directoryOnly = false
+    directoryOnly = false,
+    aliases: { [key: string]: string } = {}
   ): Brackets {
     const queryId = (query as SearchQueryDTOWithID).queryId;
     switch (query.type) {
@@ -552,201 +614,79 @@ export class SearchManager {
           return q;
         });
 
-      case SearchQueryTypes.from_date:
+      case SearchQueryTypes.rating:
+      case SearchQueryTypes.date:
+      case SearchQueryTypes.person_count:
+      case SearchQueryTypes.resolution:
         if (directoryOnly) {
           throw new Error('not supported in directoryOnly mode');
         }
-        return new Brackets((q): unknown => {
-          if (typeof (query as FromDateSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Date Query should contain from value'
-            );
-          }
-          const relation = (query as TextSearch).negate ? '<' : '>=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['from' + queryId] = (query as FromDateSearch).value;
-          if (Config.Gallery.ignoreTimestampOffset === true) {
-            q.where(
-              `(media.metadata.creationDate + (coalesce(media.metadata.creationDateOffset,0) * 60000)) ${relation} :from${queryId}`,
-              textParam
-            );
-          } else {
-            q.where(
-              `media.metadata.creationDate ${relation} :from${queryId}`,
-              textParam
-            );
-          }
-
-          return q;
-        });
-
-      case SearchQueryTypes.to_date:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as ToDateSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Date Query should contain to value'
-            );
-          }
-          const relation = (query as TextSearch).negate ? '>' : '<=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['to' + queryId] = (query as ToDateSearch).value;
-          if (Config.Gallery.ignoreTimestampOffset === true) {
-            q.where(
-              `(media.metadata.creationDate + (coalesce(media.metadata.creationDateOffset,0) * 60000)) ${relation} :to${queryId}`,
-              textParam 
-            );
-          } else {
-            q.where(
-              `media.metadata.creationDate ${relation} :to${queryId}`,
-              textParam 
-            );
-
-          }
-
-          return q;
-        });
-
-      case SearchQueryTypes.min_rating:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as MinRatingSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Rating Query should contain minvalue'
-            );
-          }
-
-          const relation = (query as TextSearch).negate ? '<' : '>=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['min' + queryId] = (query as MinRatingSearch).value;
-          q.where(
-            `media.metadata.rating ${relation}  :min${queryId}`,
-            textParam
+        if (typeof (query as RangeSearch).min === 'undefined' && typeof (query as RangeSearch).max === 'undefined') {
+          throw new Error(
+            `Invalid search query: ${SearchQueryTypes[query.type]}(type: ${query.type}) query should contain min or max value. Query got: ${JSON.stringify(query)}`
           );
-
-          return q;
-        });
-      case SearchQueryTypes.max_rating:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
         }
+
+        let field = '';
+        let timeOffset = '';
+        let min = (query as RangeSearch).min;
+        let max = (query as RangeSearch).max;
+
+        switch (query.type) {
+          case SearchQueryTypes.date:
+            timeOffset = Config.Gallery.ignoreTimestampOffset === true ? ' + (coalesce(media.metadata.creationDateOffset,0) * 60000)' : '';
+            field = 'media.metadata.creationDate';
+            break;
+
+          case SearchQueryTypes.rating:
+            field = 'media.metadata.rating';
+            break;
+
+          case SearchQueryTypes.person_count:
+            field = 'media.metadata.personsLength';
+            break;
+
+          case SearchQueryTypes.resolution:
+            field = 'media.metadata.size.width * media.metadata.size.height';
+            if (min) {
+              min *= 1000 * 1000;
+            }
+            if (max) {
+              max *= 1000 * 1000;
+            }
+            break;
+        }
+
+
         return new Brackets((q): unknown => {
-          if (typeof (query as MaxRatingSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Rating Query should contain  max value'
-            );
-          }
 
-          const relation = (query as TextSearch).negate ? '>' : '<=';
 
-          if (typeof (query as MaxRatingSearch).value !== 'undefined') {
-            const textParam: { [key: string]: unknown } = {};
-            textParam['max' + queryId] = (query as MaxRatingSearch).value;
+          const textParam: { [key: string]: unknown } = {};
+          if (min === max) {
+            textParam['eql' + queryId] = min;
             q.where(
-              `media.metadata.rating ${relation}  :max${queryId}`,
+              `${field} ${timeOffset} = :eql${queryId}`,
+              textParam
+            );
+            return q;
+          }
+          const minRelation = (query as NegatableSearchQuery).negate ? '<' : '>=';
+          const maxRelation = (query as NegatableSearchQuery).negate ? '>' : '<=';
+
+          if (typeof min !== 'undefined') {
+            textParam['min' + queryId] = min;
+            q.where(
+              `${field} ${timeOffset} ${minRelation} :min${queryId}`,
               textParam
             );
           }
-          return q;
-        });
-
-      case SearchQueryTypes.min_person_count:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as MinPersonCountSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Person count Query should contain minvalue'
-            );
-          }
-
-          const relation = (query as TextSearch).negate ? '<' : '>=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['min' + queryId] = (query as MinPersonCountSearch).value;
-          q.where(
-            `media.metadata.personsLength ${relation}  :min${queryId}`,
-            textParam
-          );
-
-          return q;
-        });
-      case SearchQueryTypes.max_person_count:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as MaxPersonCountSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Person count Query should contain max value'
-            );
-          }
-
-          const relation = (query as TextSearch).negate ? '>' : '<=';
-
-          if (typeof (query as MaxRatingSearch).value !== 'undefined') {
-            const textParam: { [key: string]: unknown } = {};
-            textParam['max' + queryId] = (query as MaxPersonCountSearch).value;
-            q.where(
-              `media.metadata.personsLength ${relation}  :max${queryId}`,
+          if (typeof max !== 'undefined') {
+            textParam['max' + queryId] = max;
+            q.andWhere(
+              `${field} ${timeOffset} ${maxRelation} :max${queryId}`,
               textParam
             );
           }
-          return q;
-        });
-
-      case SearchQueryTypes.min_resolution:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as MinResolutionSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Resolution Query should contain min value'
-            );
-          }
-
-          const relation = (query as TextSearch).negate ? '<' : '>=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['min' + queryId] =
-            (query as MinResolutionSearch).value * 1000 * 1000;
-          q.where(
-            `media.metadata.size.width * media.metadata.size.height ${relation} :min${queryId}`,
-            textParam
-          );
-
-          return q;
-        });
-
-      case SearchQueryTypes.max_resolution:
-        if (directoryOnly) {
-          throw new Error('not supported in directoryOnly mode');
-        }
-        return new Brackets((q): unknown => {
-          if (typeof (query as MaxResolutionSearch).value === 'undefined') {
-            throw new Error(
-              'Invalid search query: Rating Query should contain min or max value'
-            );
-          }
-
-          const relation = (query as TextSearch).negate ? '>' : '<=';
-
-          const textParam: { [key: string]: unknown } = {};
-          textParam['max' + queryId] =
-            (query as MaxResolutionSearch).value * 1000 * 1000;
-          q.where(
-            `media.metadata.size.width * media.metadata.size.height ${relation} :max${queryId}`,
-            textParam
-          );
 
           return q;
         });
@@ -906,13 +846,13 @@ export class SearchManager {
             switch (tq.frequency) {
               case DatePatternFrequency.every_year:
                 const d = new Date();
-                if (tq.daysLength >= (Utils.isDateFromLeapYear(d) ? 366: 365)) { // trivial result includes all photos
+                if (tq.daysLength >= (Utils.isDateFromLeapYear(d) ? 366 : 365)) { // trivial result includes all photos
                   if (tq.negate) {
                     q.andWhere('FALSE');
                   }
                   return q;
                 }
-                
+
                 const dayOfYear = Utils.getDayOfYear(d);
                 addWhere('%m%d', dayOfYear - tq.daysLength < 0);
                 break;
@@ -947,6 +887,19 @@ export class SearchManager {
         throw new Error('Some of not supported');
     }
 
+
+    if(!TextSearchQueryTypes.includes(query.type)){
+        throw new Error(
+          `Invalid search query: Unknown query type: ${SearchQueryTypes[query.type]}(type: ${query.type})`
+        );
+    }
+
+    if (typeof (query as TextSearch).value === 'undefined') {
+      throw new Error(
+        `Invalid search query: ${SearchQueryTypes[query.type]}(type: ${query.type}) query should contain 'value' property. Query got: ${JSON.stringify(query)}`
+      );
+    }
+
     return new Brackets((q: WhereExpression) => {
       const createMatchString = (str: string): string => {
         if (
@@ -971,32 +924,32 @@ export class SearchManager {
 
       const textParam: { [key: string]: unknown } = {};
       textParam['text' + queryId] = createMatchString(
-        (query as TextSearch).text
+        (query as TextSearch).value
       );
 
       if (
         query.type === SearchQueryTypes.any_text ||
         query.type === SearchQueryTypes.directory
       ) {
-        const dirPathStr = (query as TextSearch).text.replace(
+        const dirPathStr = (query as TextSearch).value.replace(
           new RegExp('\\\\', 'g'),
           '/'
         );
-
+        const alias = aliases['directory'] ?? 'directory';
         textParam['fullPath' + queryId] = createMatchString(dirPathStr);
         q[whereFN](
-          `directory.path ${LIKE} :fullPath${queryId} COLLATE ` + SQL_COLLATE,
+          `${alias}.path ${LIKE} :fullPath${queryId} COLLATE ` + SQL_COLLATE,
           textParam
         );
 
-        const directoryPath = GalleryManager.parseRelativeDirePath(dirPathStr);
+        const directoryPath = GalleryManager.parseRelativeDirPath(dirPathStr);
         q[whereFN](
           new Brackets((dq): unknown => {
             textParam['dirName' + queryId] = createMatchString(
               directoryPath.name
             );
             dq[whereFNRev](
-              `directory.name ${LIKE} :dirName${queryId} COLLATE ${SQL_COLLATE}`,
+              `${alias}.name ${LIKE} :dirName${queryId} COLLATE ${SQL_COLLATE}`,
               textParam
             );
             if (dirPathStr.includes('/')) {
@@ -1004,7 +957,7 @@ export class SearchManager {
                 directoryPath.parent
               );
               dq[whereFNRev](
-                `directory.path ${LIKE} :parentName${queryId} COLLATE ${SQL_COLLATE}`,
+                `${alias}.path ${LIKE} :parentName${queryId} COLLATE ${SQL_COLLATE}`,
                 textParam
               );
             }
@@ -1065,16 +1018,16 @@ export class SearchManager {
               qbr[whereFN](
                 new Brackets((qb): void => {
                   textParam['CtextC' + queryId] = `%,${
-                    (query as TextSearch).text
+                    (query as TextSearch).value
                   },%`;
                   textParam['Ctext' + queryId] = `%,${
-                    (query as TextSearch).text
+                    (query as TextSearch).value
                   }`;
                   textParam['textC' + queryId] = `${
-                    (query as TextSearch).text
+                    (query as TextSearch).value
                   },%`;
                   textParam['text_exact' + queryId] = `${
-                    (query as TextSearch).text
+                    (query as TextSearch).value
                   }`;
 
                   qb[whereFN](
@@ -1118,6 +1071,19 @@ export class SearchManager {
       }
       return q;
     });
+  }
+
+  public hasDirectoryQuery(query: SearchQueryDTO): boolean {
+    switch (query.type) {
+      case SearchQueryTypes.AND:
+      case SearchQueryTypes.OR:
+      case SearchQueryTypes.SOME_OF:
+        return (query as SearchListQuery).list.some(q => this.hasDirectoryQuery(q));
+      case SearchQueryTypes.any_text:
+      case SearchQueryTypes.directory:
+        return true;
+    }
+    return false;
   }
 
   protected flattenSameOfQueries(query: SearchQueryDTO): SearchQueryDTO {
@@ -1240,7 +1206,7 @@ export class SearchManager {
   }
 
   /**
-   * Returns only those part of a query tree that only contains directory related search queries
+   * Returns only those parts of a query tree that only contains directory-related search queries
    */
   private filterDirectoryQuery(query: SearchQueryDTO): SearchQueryDTO {
     switch (query.type) {
@@ -1295,11 +1261,11 @@ export class SearchManager {
     }
     if (
       query.type === SearchQueryTypes.distance &&
-      (query as DistanceSearch).from.text
+      (query as DistanceSearch).from.value
     ) {
       (query as DistanceSearch).from.GPSData =
         await ObjectManagers.getInstance().LocationManager.getGPSData(
-          (query as DistanceSearch).from.text
+          (query as DistanceSearch).from.value
         );
     }
     return query;

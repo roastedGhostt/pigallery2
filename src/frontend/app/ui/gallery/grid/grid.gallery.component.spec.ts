@@ -7,12 +7,14 @@ import {OverlayService} from '../overlay.service';
 import {ContentService} from '../content.service';
 import {GallerySortingService} from '../navigator/sorting.service';
 import {QueryService} from '../../../model/query.service';
-import {BehaviorSubject, of} from 'rxjs';
-import {HttpClientTestingModule} from '@angular/common/http/testing';
+import {BehaviorSubject, Observable, of} from 'rxjs';
+import {provideHttpClientTesting} from '@angular/common/http/testing';
 import {PhotoDTO} from '../../../../../common/entities/PhotoDTO';
 import {GridMedia} from './GridMedia';
 import {GalleryNavigatorService} from '../navigator/navigator.service';
 import {GridSizes} from '../../../../../common/entities/GridSizes';
+import {provideHttpClient, withInterceptorsFromDi} from '@angular/common/http';
+import {BlogService, GroupedMarkdown} from '../blog/blog.service';
 
 class MockQueryService {
 }
@@ -30,19 +32,26 @@ class MockGalleryNavigatorService {
   girdSize = new BehaviorSubject(GridSizes.medium);
 }
 
+
+class MockBlogService {
+  getMarkDowns(date: Date): Observable<GroupedMarkdown[]> {
+    return of([]);
+  }
+}
+
 describe('GalleryGridComponent', () => {
   let component: GalleryGridComponent;
   let fixture: ComponentFixture<GalleryGridComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      declarations: [GalleryGridComponent],
+      imports: [GalleryGridComponent],
       providers: [
         ChangeDetectorRef, Router,
         {provide: ContentService, useClass: MockContentService},
         {provide: QueryService, useClass: MockQueryService},
         {provide: OverlayService, useClass: MockOverlayService},
+        {provide: BlogService, useClass: MockBlogService},
         {provide: GallerySortingService, useClass: MockGallerySortingService},
         {provide: GalleryNavigatorService, useClass: MockGalleryNavigatorService},
         {provide: OverlayService, useClass: MockOverlayService},
@@ -52,7 +61,10 @@ describe('GalleryGridComponent', () => {
             queryParams: of([{id: 1}]),
             params: of([{id: 1}]),
           },
-        }]
+        },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting()
+      ]
     })
       .compileComponents();
 

@@ -7,6 +7,7 @@ import {createLoggerWrapper} from '../../Logger';
 import * as express from 'express';
 import {ExtensionMessengerHandler} from './ExtensionMessengerHandler';
 import {ExtensionConfig} from './ExtensionConfig';
+import {UIExtension} from './UIExtension';
 
 export class ExtensionObject<C> implements IExtensionObject<C> {
 
@@ -18,7 +19,15 @@ export class ExtensionObject<C> implements IExtensionObject<C> {
   public readonly events;
   public readonly RESTApi;
   public readonly messengers;
+  public readonly ui;
 
+  /**
+   * @param extensionId - Unique ID used internally to track this extension instance (may have _1, _2 suffix if name collision occurs)
+   * @param extensionName - Display name of the extension (typically from package.json)
+   * @param folder - Folder name where the extension is stored (also used as config key in Config.Extensions.extensions)
+   * @param extensionRouter - Express router for extension REST API endpoints
+   * @param events - Extension events for hooking into gallery functionality
+   */
   constructor(public readonly extensionId: string,
               public readonly extensionName: string,
               public readonly folder: string,
@@ -33,6 +42,7 @@ export class ExtensionObject<C> implements IExtensionObject<C> {
     this.events = events;
     this.RESTApi = new ExpressRouterWrapper(extensionRouter, extensionId, logger);
     this.messengers = new ExtensionMessengerHandler(logger);
+    this.ui = new UIExtension(this);
   }
 
 }

@@ -17,12 +17,40 @@ import {FilterService} from './filter/filter.service';
 import {PiTitleService} from '../../model/pi-title.service';
 import {GPXFilesFilterPipe} from '../../pipes/GPXFilesFilterPipe';
 import {MDFilesFilterPipe} from '../../pipes/MDFilesFilterPipe';
-import {ContentLoaderService, ContentWrapperWithError} from './contentLoader.service';
+import {ContentLoaderService} from './contentLoader.service';
+import { GalleryLightboxComponent } from './lightbox/lightbox.gallery.component';
+import { FrameComponent } from '../frame/frame.component';
+import { NgIf } from '@angular/common';
+import { RandomQueryBuilderGalleryComponent } from './random-query-builder/random-query-builder.gallery.component';
+import { PhotoFrameBuilderGalleryComponent } from './photo-frame-builder/photo-frame-builder.gallery.component';
+import { GalleryNavigatorComponent } from './navigator/navigator.gallery.component';
+import { DirectoriesComponent } from './directories/directories.component';
+import { GalleryBlogComponent } from './blog/blog.gallery.component';
+import { GalleryMapComponent } from './map/map.gallery.component';
+import { PhotoFilterPipe } from '../../pipes/PhotoFilterPipe';
+import { MediaButtonModalComponent } from './grid/photo/media-button-modal/media-button-modal.component';
+import {ContentWrapperWithError} from '../../../../common/entities/ContentWrapper';
+import {SearchQueryUtils} from '../../../../common/SearchQueryUtils';
 
 @Component({
-  selector: 'app-gallery',
-  templateUrl: './gallery.component.html',
-  styleUrls: ['./gallery.component.css'],
+    selector: 'app-gallery',
+    templateUrl: './gallery.component.html',
+    styleUrls: ['./gallery.component.css'],
+    imports: [
+        GalleryLightboxComponent,
+        FrameComponent,
+        NgIf,
+        RandomQueryBuilderGalleryComponent,
+        PhotoFrameBuilderGalleryComponent,
+        GalleryNavigatorComponent,
+        DirectoriesComponent,
+        GalleryBlogComponent,
+        GalleryMapComponent,
+        GalleryGridComponent,
+        GPXFilesFilterPipe,
+        PhotoFilterPipe,
+        MediaButtonModalComponent,
+    ]
 })
 export class GalleryComponent implements OnInit, OnDestroy {
   @ViewChild(GalleryGridComponent, {static: false})
@@ -66,7 +94,7 @@ export class GalleryComponent implements OnInit, OnDestroy {
     private mdFilesFilterPipe: MDFilesFilterPipe,
   ) {
     this.mapEnabled = Config.Map.enabled;
-    PageHelper.showScrollY();
+    PageHelper.showScrollY('gallery');
   }
 
   get ContentWrapper(): ContentWrapperWithError {
@@ -143,7 +171,7 @@ export class GalleryComponent implements OnInit, OnDestroy {
   }
 
   private onRoute = async (params: Params): Promise<void> => {
-    const searchQuery = params[QueryParams.gallery.search.query];
+    const searchQuery = SearchQueryUtils.parseURLifiedQuery(params[QueryParams.gallery.search.query]);
     if (searchQuery) {
       this.contentLoader.search(searchQuery).catch(console.error);
       this.piTitleService.setSearchTitle(searchQuery);
@@ -161,7 +189,7 @@ export class GalleryComponent implements OnInit, OnDestroy {
       qParams[QueryParams.gallery.sharingKey_query] =
         this.shareService.getSharingKey();
       this.router
-        .navigate(['/gallery', sharing.path], {queryParams: qParams})
+        .navigate(['/search', JSON.stringify(sharing.searchQuery)], {queryParams: qParams})
         .catch(console.error);
       return;
     }

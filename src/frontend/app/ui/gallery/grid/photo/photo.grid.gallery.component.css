@@ -3,6 +3,7 @@
   overflow: hidden;
   transition: scale .3s ease-out;
 }
+
 :host:hover {
   scale: 98%;
 }
@@ -19,8 +20,8 @@ img {
   vertical-align: unset;
 }
 
-img.loading{
-  background: var(--item-background) ;
+img.loading {
+  background: var(--item-background);
 }
 
 @keyframes fadein {
@@ -159,4 +160,54 @@ a {
 
 .photo-keywords ng-icon {
   margin-right: 2px;
+}
+
+.media-buttons {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: flex;
+  gap: 5px;
+  z-index: 10;
+}
+
+.media-button {
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  cursor: pointer;
+  transition: background-color .3s ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-button:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.media-button-icon {
+  width: 18px;
+  height: 18px;
+  fill: white;
+}
+
+.photo-container:hover .media-button {
+  opacity: 1;
+}
+
+.media-button {
+  opacity: 0;
+  transition: opacity .3s ease-out;
+}
+
+.media-button.always-visible {
+  opacity: 1;
+}
+
+.no-click {
+  cursor: auto;
 }

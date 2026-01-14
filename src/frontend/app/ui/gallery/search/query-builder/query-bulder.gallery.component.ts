@@ -1,31 +1,38 @@
 import {Component, EventEmitter, forwardRef, Input, Output,} from '@angular/core';
 import {SearchQueryDTO, SearchQueryTypes, TextSearch,} from '../../../../../../common/entities/SearchQueryDTO';
-import {ControlValueAccessor, NG_VALIDATORS, NG_VALUE_ACCESSOR, ValidationErrors, Validator,} from '@angular/forms';
+import { ControlValueAccessor, NG_VALIDATORS, NG_VALUE_ACCESSOR, ValidationErrors, Validator, FormsModule } from '@angular/forms';
 import {SearchQueryParserService} from '../search-query-parser.service';
 import {Utils} from '../../../../../../common/Utils';
+import { GallerySearchFieldBaseComponent } from '../search-field-base/search-field-base.gallery.component';
+import { GallerySearchQueryEntryComponent } from '../query-enrty/query-entry.search.gallery.component';
 
 @Component({
-  selector: 'app-gallery-search-query-builder',
-  templateUrl: './query-builder.gallery.component.html',
-  styleUrls: ['./query-builder.gallery.component.css'],
-  providers: [
-    {
-      provide: NG_VALUE_ACCESSOR,
-      useExisting: forwardRef(() => GallerySearchQueryBuilderComponent),
-      multi: true,
-    },
-    {
-      provide: NG_VALIDATORS,
-      useExisting: forwardRef(() => GallerySearchQueryBuilderComponent),
-      multi: true,
-    },
-  ],
+    selector: 'app-gallery-search-query-builder',
+    templateUrl: './query-builder.gallery.component.html',
+    styleUrls: ['./query-builder.gallery.component.css'],
+    providers: [
+        {
+            provide: NG_VALUE_ACCESSOR,
+            useExisting: forwardRef(() => GallerySearchQueryBuilderComponent),
+            multi: true,
+        },
+        {
+            provide: NG_VALIDATORS,
+            useExisting: forwardRef(() => GallerySearchQueryBuilderComponent),
+            multi: true,
+        },
+    ],
+    imports: [
+        GallerySearchFieldBaseComponent,
+        FormsModule,
+        GallerySearchQueryEntryComponent,
+    ]
 })
 export class GallerySearchQueryBuilderComponent
     implements ControlValueAccessor, Validator {
   public searchQueryDTO: SearchQueryDTO = {
     type: SearchQueryTypes.any_text,
-    text: '',
+    value: '',
   } as TextSearch;
   @Output() search = new EventEmitter<void>();
   @Input() placeholder = $localize`Search`;
@@ -52,7 +59,7 @@ export class GallerySearchQueryBuilderComponent
 
   resetQuery(): void {
     this.searchQueryDTO = {
-      text: '',
+      value: '',
       type: SearchQueryTypes.any_text,
     } as TextSearch;
     this.onChange();

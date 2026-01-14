@@ -7,12 +7,19 @@ import {FacesService} from '../faces.service';
 import {AuthenticationService} from '../../../model/network/authentication.service';
 import {Config} from '../../../../../common/config/public/Config';
 import {SearchQueryTypes, TextSearch, TextSearchQueryMatchTypes,} from '../../../../../common/entities/SearchQueryDTO';
+import { NgIf } from '@angular/common';
+import { NgIconComponent } from '@ng-icons/core';
+import {SearchQueryUtils} from '../../../../../common/SearchQueryUtils';
 
 @Component({
-  selector: 'app-face',
-  templateUrl: './face.component.html',
-  styleUrls: ['./face.component.css'],
-  providers: [RouterLink],
+    selector: 'app-face',
+    templateUrl: './face.component.html',
+    styleUrls: ['./face.component.css'],
+    imports: [
+        RouterLink,
+        NgIf,
+        NgIconComponent,
+    ]
 })
 export class FaceComponent implements OnInit, OnDestroy {
   @Input() person: PersonDTO;
@@ -38,9 +45,9 @@ export class FaceComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.thumbnail = this.thumbnailService.getPersonThumbnail(this.person);
-    this.searchQueryDTOstr = JSON.stringify({
+    this.searchQueryDTOstr = SearchQueryUtils.urlify({
       type: SearchQueryTypes.person,
-      text: this.person.name,
+      value: this.person.name,
       matchType: TextSearchQueryMatchTypes.exact_match,
     } as TextSearch);
   }

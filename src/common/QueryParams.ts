@@ -13,12 +13,30 @@ export const QueryParams = {
       type: 'type',
       query: 'qs',
     },
+    map: {
+      show: 'map'
+    },
     photo: 'p',
-    playback: 'play',
     sharingKey_query: 'sk',
     sharingKey_params: 'sharingKey',
     directory: 'directory',
     knownLastModified: 'klm',
     knownLastScanned: 'kls',
+    lightbox: {
+      playback: 'play',
+      captionAlwaysOn: 'cAO',
+      controllersDimmed: 'cd',
+      facesAlwaysOn: 'fAO',
+      loopVideos: 'lv',
+      loopSlideshow: 'ls',
+      slideshowSpeed: 'ssp', // in seconds
+      titles: {
+        topLeftTitle: 'tlt',
+        topLeftSubTitle: 'tlst',
+        bottomLeftTitle: 'blt',
+        bottomLeftSubTitle: 'blst',
+      }
+    },
+    autoPollInterval: 'auInt',
   },
 };

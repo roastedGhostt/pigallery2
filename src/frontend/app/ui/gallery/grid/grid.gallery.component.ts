@@ -28,11 +28,28 @@ import {GallerySortingService, MediaGroup} from '../navigator/sorting.service';
 import {GroupByTypes} from '../../../../../common/entities/SortingMethods';
 import {GalleryNavigatorService} from '../navigator/navigator.service';
 import {GridSizes} from '../../../../../common/entities/GridSizes';
+import {AsyncPipe, NgFor, NgIf, NgSwitch, NgSwitchCase, NgSwitchDefault} from '@angular/common';
+import {NgIconComponent} from '@ng-icons/core';
+import {GalleryBlogComponent} from '../blog/blog.gallery.component';
+import {ParseIntPipe} from '../../../pipes/ParseIntPipe';
+import {BlogService} from '../blog/blog.service';
 
 @Component({
   selector: 'app-gallery-grid',
   templateUrl: './grid.gallery.component.html',
   styleUrls: ['./grid.gallery.component.css'],
+  imports: [
+    NgIf,
+    NgFor,
+    NgSwitch,
+    NgSwitchCase,
+    NgIconComponent,
+    NgSwitchDefault,
+    GalleryBlogComponent,
+    GalleryPhotoComponent,
+    ParseIntPipe,
+    AsyncPipe,
+  ]
 })
 export class GalleryGridComponent
   implements OnInit, OnChanges, AfterViewInit, OnDestroy {
@@ -43,6 +60,7 @@ export class GalleryGridComponent
   @Input() mediaGroups: MediaGroup[];
   mediaToRender: GridMediaGroup[] = [];
   containerWidth = 0;
+  containerMinHeight = 0; // used to fix container height while updating photos to prevent flickering
   screenHeight = 0;
   isAfterViewInit = false;
   subscriptions: {
@@ -53,16 +71,16 @@ export class GalleryGridComponent
     girdSize: null
   };
   delayedRenderUpToPhoto: string = null;
+  public IMAGE_MARGIN = 2;
+  public renderDelayTimer: number = null; // delays render on resize
+  public readonly GroupByTypes = GroupByTypes;
+  public readonly blogOpen = Config.Gallery.InlineBlogStartsOpen;
   private scrollListenerPhotos: GalleryPhotoComponent[] = [];
   private TARGET_COL_COUNT = 1;
   private MIN_ROW_COUNT = 1;
   private MAX_ROW_COUNT = 3;
-  public IMAGE_MARGIN = 2;
   private onScrollFired = false;
   private helperTime: number = null;
-  public renderDelayTimer: number = null; // delays render on resize
-  public readonly GroupByTypes = GroupByTypes;
-  public readonly blogOpen = Config.Gallery.InlineBlogStartsOpen;
 
   constructor(
     private overlayService: OverlayService,
@@ -71,7 +89,8 @@ export class GalleryGridComponent
     private router: Router,
     public sortingService: GallerySortingService,
     public navigatorService: GalleryNavigatorService,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    public blogService: BlogService
   ) {
   }
 
@@ -79,9 +98,16 @@ export class GalleryGridComponent
     if (this.isAfterViewInit === false) {
       return;
     }
-    this.updateContainerDimensions();
-    this.mergeNewPhotos();
-    this.renderMinimalPhotos();
+
+    this.containerMinHeight = Math.min(PageHelper.ScrollY + window.innerHeight, this.gridContainer.nativeElement.clientHeight); // reduce flickering
+    setTimeout(() => {
+      this.updateContainerDimensions();
+      this.mergeNewPhotos();
+      this.renderMinimalPhotos();
+      setTimeout(() => {
+        this.containerMinHeight = 0; // remove min height after new photos are rendered
+      }, 0);
+    }, 0);
   }
 
   ngOnInit(): void {
@@ -147,11 +173,11 @@ export class GalleryGridComponent
       clearTimeout(this.renderDelayTimer);
       this.renderDelayTimer = null;
     }
-    if (this.subscriptions.route !== null) {
+    if (this.subscriptions.route) {
       this.subscriptions.route.unsubscribe();
       this.subscriptions.route = null;
     }
-    if (this.subscriptions.girdSize !== null) {
+    if (this.subscriptions.girdSize) {
       this.subscriptions.girdSize.unsubscribe();
       this.subscriptions.girdSize = null;
     }
@@ -178,18 +204,6 @@ export class GalleryGridComponent
     }, 100);
   }
 
-  /*
-  Renders some photos. If nothing specified, this amount should be enough
-  * */
-  private renderMinimalPhotos() {
-    this.helperTime = window.setTimeout((): void => {
-      this.renderPhotos();
-      if (this.delayedRenderUpToPhoto) {
-        this.renderUpToMedia(this.delayedRenderUpToPhoto);
-      }
-    }, 0);
-  }
-
   photoClicked(media: MediaDTO): void {
     this.router.navigate([], {
       queryParams: this.queryService.getParams({media}),
@@ -212,7 +226,6 @@ export class GalleryGridComponent
     this.renderMinimalPhotos();
     this.isAfterViewInit = true;
   }
-
 
   // Merging photos after new sorting and filter was applied
   public mergeNewPhotos(): void {
@@ -274,7 +287,7 @@ export class GalleryGridComponent
     // if all check passed, nothing to delete from the last group
     if (!diffFound &&
       lastOkIndex.media == this.mediaGroups[lastOkIndex.groups].media.length - 1) {
-      firstDeleteIndex.groups = lastOkIndex.groups;
+      firstDeleteIndex.groups = lastOkIndex.groups; // delete last ok group as we might want to add more photos
       firstDeleteIndex.media = lastOkIndex.media + 1;
     }
 
@@ -290,8 +303,6 @@ export class GalleryGridComponent
     this.mediaToRender.splice(firstDeleteIndex.groups + 1);
     const media = this.mediaToRender[firstDeleteIndex.groups].media;
     media.splice(firstDeleteIndex.media);
-
-
   }
 
   public renderARow(): number {
@@ -377,9 +388,24 @@ export class GalleryGridComponent
     }
   }
 
+  getNumberOfRenderedMedia() {
+    return this.mediaToRender.reduce((c, mg) => c + mg.media.length, 0);
+  }
+
+  /*
+  Renders some photos. If nothing is specified, this amount should be enough
+  * */
+  private renderMinimalPhotos() {
+    this.helperTime = window.setTimeout((): void => {
+      this.renderPhotos();
+      if (this.delayedRenderUpToPhoto) {
+        this.renderUpToMedia(this.delayedRenderUpToPhoto);
+      }
+    }, 0);
+  }
+
   private getMaxRowHeight(): number {
-    const rowCount = this.screenHeight > this.containerWidth ? 0 : this.MIN_ROW_COUNT;
-    return this.screenHeight / rowCount;
+    return this.screenHeight / this.MIN_ROW_COUNT;
   }
 
   /**
@@ -391,6 +417,7 @@ export class GalleryGridComponent
     }
     let groupIndex = -1;
     let mediaIndex = -1;
+
     for (let i = 0; i < this.mediaGroups.length; ++i) {
       mediaIndex = this.mediaGroups[i].media.findIndex(
         (p): boolean => this.queryService.getMediaStringId(p) === mediaStringId
@@ -404,12 +431,12 @@ export class GalleryGridComponent
       this.router.navigate([], {queryParams: this.queryService.getParams()});
       return;
     }
-    // Make sure that at leas one more row is rendered
-    // It is possible that only the last few pixels of a photo is visible,
-    // so not required to render more, but the scrollbar does not trigger more photos to render
+    // Make sure that at least one more row is rendered
+    // It is possible that only the last few pixels of a photo are visible,
+    // so not required to render more. However, the scrollbar does not trigger more photos to render
     // (on lightbox navigation)
     while (
-      (this.mediaToRender.length - 1 <= groupIndex ||
+      ((this.mediaToRender.length - 1 <= groupIndex && this.mediaGroups.length > 1) ||
         this.mediaToRender[this.mediaToRender.length - 1]?.media?.length < mediaIndex) &&
       this.renderARow() !== null
       // eslint-disable-next-line no-empty
@@ -430,14 +457,11 @@ export class GalleryGridComponent
    */
   private shouldRenderMore(offset = 0): boolean {
     const bottomOffset = this.getMaxRowHeight() * 2;
+    const maxScroll = PageHelper.MaxScrollY + offset;
     return (
       Config.Gallery.enableOnScrollRendering === false ||
-      PageHelper.ScrollY >=
-      document.body.clientHeight +
-      offset -
-      window.innerHeight -
-      bottomOffset ||
-      (document.body.clientHeight + offset) * 0.85 < window.innerHeight
+      PageHelper.ScrollY >= maxScroll - bottomOffset || // too close to the bottom
+      maxScroll * 0.85 < window.innerHeight
     );
   }
 
@@ -452,7 +476,6 @@ export class GalleryGridComponent
     ) {
       return;
     }
-
     let renderedContentHeight = 0;
 
     while (
@@ -473,17 +496,13 @@ export class GalleryGridComponent
       (this.mediaToRender[this.mediaToRender.length - 1]?.media.length || 0) < this.mediaGroups[this.mediaToRender.length - 1]?.media.length;
   }
 
-  getNumberOfRenderedMedia() {
-    return this.mediaToRender.reduce((c, mg) => c + mg.media.length, 0);
-  }
-
   private updateContainerDimensions(): boolean {
     if (!this.gridContainer) {
       return false;
     }
 
-    const pre = PageHelper.isScrollYVisible();
-    PageHelper.showScrollY();
+    const scrollY = PageHelper.OverflowY;
+    PageHelper.showScrollY('grid');
     // if the width changed a bit or the height changed a lot
     if (
       this.containerWidth !== this.gridContainer.nativeElement.parentElement.clientWidth ||
@@ -493,15 +512,11 @@ export class GalleryGridComponent
       this.screenHeight = window.innerHeight;
       this.containerWidth = this.gridContainer.nativeElement.parentElement.clientWidth;
       this.clearRenderedPhotos();
-      if (!pre) {
-        PageHelper.hideScrollY();
-      }
+      PageHelper.OverflowY = scrollY;
       return true;
     }
 
-    if (!pre) {
-      PageHelper.hideScrollY();
-    }
+    PageHelper.OverflowY = scrollY;
     return false;
   }
 }

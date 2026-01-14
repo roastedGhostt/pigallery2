@@ -9,10 +9,10 @@ import {CookieNames} from '../../common/CookieNames';
 import {ErrorCodes, ErrorDTO} from '../../common/entities/Error';
 import {UserDTO} from '../../common/entities/UserDTO';
 import {ServerTimeEntry} from '../middlewares/ServerTimingMWs';
-import {ClientConfig, TAGS} from '../../common/config/public/ClientConfig';
 import {QueryParams} from '../../common/QueryParams';
 import {PhotoProcessing} from '../model/fileaccess/fileprocessing/PhotoProcessing';
 import {Utils} from '../../common/Utils';
+import {ObjectManagers} from '../model/ObjectManagers';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -74,25 +74,17 @@ export class PublicRouter {
       res.tpl = {};
 
       res.tpl.user = null;
-      if (req.session['user']) {
+      if (req.session.context?.user) {
         res.tpl.user = {
-          id: req.session['user'].id,
-          name: req.session['user'].name,
-          csrfToken: req.session['user'].csrfToken,
-          role: req.session['user'].role,
-          usedSharingKey: req.session['user'].usedSharingKey,
-          permissions: req.session['user'].permissions,
+          id: req.session.context.user.id,
+          name: req.session.context.user.name,
+          role: req.session.context.user.role,
+          usedSharingKey: req.session.context.user.usedSharingKey,
+          projectionKey: req.session.context.user.projectionKey,
         } as UserDTO;
 
-        if (!res.tpl.user.csrfToken && req.csrfToken) {
-          res.tpl.user.csrfToken = req.csrfToken();
-        }
       }
-      const confCopy = Config.toJSON({
-        attachVolatile: true,
-        skipTags: {secret: true} as TAGS,
-        keepTags: {client: true}
-      }) as unknown as ClientConfig;
+      const confCopy = Config.getClientConfig();
       // Escaping html tags, like <script></script>
       confCopy.Server.customHTMLHead =
         confCopy.Server.customHTMLHead
@@ -105,6 +97,8 @@ export class PublicRouter {
       res.tpl.customHTMLHead = Config.Server.customHTMLHead;
       const selectedTheme = Config.Gallery.Themes.availableThemes.find(th => th.name === Config.Gallery.Themes.selectedTheme)?.theme || '';
       res.tpl.usedTheme = selectedTheme;
+
+      res.tpl.UIExtensionConfigs = ObjectManagers.getInstance().ExtensionManager.getUIExtensionConfigs();
 
       return next();
     };

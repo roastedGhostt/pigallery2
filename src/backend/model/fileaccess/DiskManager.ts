@@ -15,9 +15,11 @@ import {MDFileDTO} from '../../../common/entities/MDFileDTO';
 import {MetadataLoader} from './MetadataLoader';
 import {NotificationManager} from '../NotifocationManager';
 import {ExtensionDecorator} from '../extension/ExtensionDecorator';
+import {SessionManager} from '../database/SessionManager';
 
 
 const LOG_TAG = '[DiskManager]';
+declare const global: { gc: () => void };
 
 export class DiskManager {
   public static calcLastModified(stat: Stats): number {
@@ -128,11 +130,14 @@ export class DiskManager {
       lastModified: this.calcLastModified(stat),
       directories: [],
       isPartial: settings.coverOnly === true,
-      mediaCount: 0,
-      cover: null,
-      validCover: false,
       media: [],
       metaFile: [],
+      cache: {
+        projectionKey: SessionManager.NO_PROJECTION_KEY,
+        mediaCount: 0,
+        cover: null,
+        valid: false
+      }
     };
     if (!settings.coverOnly) {
       directory.lastScanned = Date.now();
@@ -147,7 +152,17 @@ export class DiskManager {
       return directory;
     }
     const list = await fsp.readdir(absoluteDirectoryName);
+    let count = 0;
+
     for (const file of list) {
+      count++;
+
+      if (count % 1000 === 0) {
+        if (global.gc) {
+          Logger.silly(LOG_TAG, 'Triggering gc after scanning ', count, ' files in dir: ', relativeDirectoryName);
+          global.gc();
+        }
+      }
       const fullFilePath = path.normalize(
         path.join(absoluteDirectoryName, file)
       );
@@ -196,10 +211,10 @@ export class DiskManager {
                 : await MetadataLoader.loadPhotoMetadata(fullFilePath),
           } as PhotoDTO;
 
-          if (!directory.cover) {
-            directory.cover = Utils.clone(photo);
+          if (!directory.cache.cover) {
+            directory.cache.cover = Utils.clone(photo);
 
-            directory.cover.directory = {
+            directory.cache.cover.directory = {
               path: directory.path,
               name: directory.name,
             };
@@ -271,20 +286,22 @@ export class DiskManager {
       }
     }
 
-    directory.mediaCount = directory.media.length;
+    directory.cache.mediaCount = directory.media.length;
+    // TODO: cache is now calculated purely though DB after indexing of the directory is done.
+    // Delete is with caution (double check if it still indeed not used)
     if (!directory.isPartial) {
-      directory.youngestMedia = Number.MAX_SAFE_INTEGER;
-      directory.oldestMedia = Number.MIN_SAFE_INTEGER;
+      directory.cache.youngestMedia = Number.MAX_SAFE_INTEGER;
+      directory.cache.oldestMedia = Number.MIN_SAFE_INTEGER;
 
       directory.media.forEach((m) => {
-          directory.youngestMedia = Math.min(Utils.getTimeMS(m.metadata.creationDate, m.metadata.creationDateOffset, Config.Gallery.ignoreTimestampOffset), directory.youngestMedia);
-          directory.oldestMedia = Math.max(Utils.getTimeMS(m.metadata.creationDate, m.metadata.creationDateOffset, Config.Gallery.ignoreTimestampOffset), directory.oldestMedia);
+          directory.cache.youngestMedia = Math.min(Utils.getTimeMS(m.metadata.creationDate, m.metadata.creationDateOffset, Config.Gallery.ignoreTimestampOffset), directory.cache.youngestMedia);
+          directory.cache.oldestMedia = Math.max(Utils.getTimeMS(m.metadata.creationDate, m.metadata.creationDateOffset, Config.Gallery.ignoreTimestampOffset), directory.cache.oldestMedia);
         }
       );
 
       directory.metaFile.forEach(mf => {
         if (DiskManager.isMarkdown(mf.name)) {
-          (mf as MDFileDTO).date = directory.youngestMedia;
+          (mf as MDFileDTO).date = directory.cache.youngestMedia;
         }
       });
     }

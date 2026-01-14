@@ -19,8 +19,9 @@ import {
   ClientSharingConfig,
   ClientSortingConfig,
   ClientUserConfig,
+  ClientUserOIDCConfig,
   ClientVideoConfig,
-  ConfigPriority,
+  ConfigPriority, MapProviders,
   TAGS
 } from '../public/ClientConfig';
 import {ConfigProperty, SubConfigClass} from 'typeconfig/common';
@@ -279,6 +280,111 @@ export class ServerDataBaseConfig {
 
 
 @SubConfigClass({softReadonly: true})
+export class ServerUserOIDCConfig extends ClientUserOIDCConfig {
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Issuer URL`,
+      priority: ConfigPriority.advanced,
+      uiResetNeeded: {server: true},
+      uiOptional:true,
+      relevant: (c: any) => c.enabled,
+      hint: 'https://auth.example.com/application/o/pigallery2/'
+    } as TAGS,
+    description: $localize`OIDC provider Issuer URL`
+  })
+  issuerUrl: string = '';
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Client ID`,
+      priority: ConfigPriority.advanced,
+      uiOptional:true,
+      relevant: (c: any) => c.enabled,
+      uiResetNeeded: {server: true}
+    }
+  })
+  clientId: string = '';
+
+  @ConfigProperty({
+    type: 'password',
+    tags: {
+      name: $localize`Client secret`,
+      priority: ConfigPriority.advanced,
+      uiOptional:true,
+      relevant: (c: any) => c.enabled,
+      uiResetNeeded: {server: true}
+    } as TAGS
+  })
+  clientSecret: string = '';
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Redirect URI`, priority:
+      ConfigPriority.advanced,
+      hint: 'https://example.com/pgapi/auth/oidc/callback',
+      uiOptional:true,
+      relevant: (c: any) => c.enabled,
+      uiResetNeeded: {server: true}
+    },
+    description: $localize`Full callback URL registered at the provider (e.g.: https://example.com/pgapi/auth/oidc/callback)`
+  })
+  redirectUri: string = '';
+
+  @ConfigProperty({
+    arrayType: 'string',
+    tags: {
+      name: $localize`Scopes`,
+      relevant: (c: any) => c.enabled,
+      priority: ConfigPriority.advanced
+    }
+  })
+  scopes: string[] = ['openid', 'profile', 'email'];
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Username claim`,
+      relevant: (c: any) => c.enabled,
+      priority: ConfigPriority.advanced
+    },
+    description: $localize`JWT claim to use for matching user name. Defaults to preferred_username; fallbacks to email if empty.`
+  })
+  usernameClaim: string = 'preferred_username';
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Email claim`,
+      relevant: (c: any) => c.enabled,
+      priority: ConfigPriority.advanced
+    }
+  })
+  emailClaim: string = 'email';
+
+  @ConfigProperty({
+    arrayType: 'string',
+    tags: {
+      name: $localize`Allowed email domains`,
+      uiOptional:true,
+      relevant: (c: any) => c.enabled,
+      priority: ConfigPriority.advanced,
+    },
+    description: $localize`If set, only identities with emails in these domains will be accepted.`
+  })
+  allowedDomains: string[] = [];
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Auto-create users`,
+      relevant: (c: any) => c.enabled,
+      priority: ConfigPriority.advanced
+    },
+    description: $localize`If enabled, unknown users will be created with Guest role on first login. If disabled, only existing app users can log in.`
+  })
+  autoCreateUser: boolean = false;
+}
+
+
+@SubConfigClass({softReadonly: true})
 export class ServerUserConfig extends ClientUserConfig {
   @ConfigProperty({
     arrayType: UserConfig,
@@ -293,6 +399,59 @@ export class ServerUserConfig extends ClientUserConfig {
     description: $localize`Creates these users in the DB during startup if they do not exist. If a user with this name exist, it won't be overwritten, even if the role is different.`,
   })
   enforcedUsers: UserConfig[] = [];
+
+
+  @ConfigProperty({
+    type: 'object',
+    tags: {
+      name: $localize`Media allow list`,
+      priority: ConfigPriority.advanced,
+      uiType: 'SearchQuery',
+      githubIssue: 1015
+    },
+    description: $localize`Setting a non empty search query here will make the app to only SHOW photos and videos that match the query. You can override this at every user separately.`,
+  })
+  allowQuery: SearchQueryDTO = {
+    type: SearchQueryTypes.any_text,
+    value: '',
+  } as TextSearch;
+
+  @ConfigProperty({
+    type: 'object',
+    tags: {
+      name: $localize`Media block list`,
+      priority: ConfigPriority.advanced,
+      uiType: 'SearchQuery',
+      githubIssue: 1015
+    },
+    description: $localize`Setting a non empty search query here will make the app to HIDE photos and videos that match the query. You can override this at every user separately.`,
+  })
+  blockQuery: SearchQueryDTO = {
+    type: SearchQueryTypes.any_text,
+    value: '',
+  } as TextSearch;
+
+  @ConfigProperty({
+    tags:
+      {
+        name: $localize`Suppress default user warning`,
+        priority: ConfigPriority.underTheHood
+      },
+    description: $localize`if true, the app won't show a warning for using the default user.`
+  })
+  suppressDefUserWarn: boolean = false;
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`OpenID Connect`,
+      priority: ConfigPriority.advanced,
+      uiResetNeeded: {server: true},
+      uiIcon: 'ionFingerPrint',
+      githubIssue: 1096
+    },
+    description:  $localize`Setup SSO with external authentication apps like Authentik or Authelia`,
+  })
+  oidc: ServerUserOIDCConfig = new ServerUserOIDCConfig();
 }
 
 
@@ -327,6 +486,18 @@ export class ServerPhotoConfig extends ClientPhotoConfig {
     description: $localize`Use high quality chroma subsampling in webp. See: https://sharp.pixelplumbing.com/api-output#webp.`
   })
   smartSubsample = true;
+
+  @ConfigProperty({
+    type: 'object',
+    tags:
+      {
+        name: $localize`Sharp options`,
+        priority: ConfigPriority.underTheHood,
+        githubIssue: 980
+      },
+    description: $localize`Add any sharp options here. They will be added to sharp constructor as raw params. See: https://sharp.pixelplumbing.com/api-constructor/.`
+  })
+  sharpOptions = {test: 444};
 
   @ConfigProperty({
     type: 'float',
@@ -530,14 +701,35 @@ export class ServerLogConfig {
   logServerTiming: boolean = false;
 }
 
+/**
+ * This is a "Hack" for the typeconfig
+ * The config should contain all the fields that are settable,
+ * otherwise change detection won't work, and we can't save the config.
+ * WARN: Do not use this class directly, use the separate Trigger classes below
+ */
 @SubConfigClass({softReadonly: true})
-export class NeverJobTriggerConfig implements NeverJobTrigger {
+export class JobTriggerConfigBase {
+
+  @ConfigProperty({type: JobTriggerType})
+  readonly type: JobTriggerType = JobTriggerType.never;
+  @ConfigProperty({type: 'unsignedInt'})
+  time?: number | undefined; // data time
+  @ConfigProperty({type: 'unsignedInt', max: 7})
+  periodicity?: number | undefined = 7; // 0-6: week days 7 every day
+  @ConfigProperty({type: 'unsignedInt', max: 23 * 60 + 59})
+  atTime?: number | undefined = 0; // daytime
+  @ConfigProperty({type: 'string'})
+  afterScheduleName?: string | undefined; // runs after schedule
+}
+
+@SubConfigClass({softReadonly: true})
+export class NeverJobTriggerConfig extends JobTriggerConfigBase implements NeverJobTrigger {
   @ConfigProperty({type: JobTriggerType})
   readonly type = JobTriggerType.never;
 }
 
 @SubConfigClass({softReadonly: true})
-export class ScheduledJobTriggerConfig implements ScheduledJobTrigger {
+export class ScheduledJobTriggerConfig extends JobTriggerConfigBase implements ScheduledJobTrigger {
   @ConfigProperty({type: JobTriggerType})
   readonly type = JobTriggerType.scheduled;
 
@@ -546,23 +738,24 @@ export class ScheduledJobTriggerConfig implements ScheduledJobTrigger {
 }
 
 @SubConfigClass({softReadonly: true})
-export class PeriodicJobTriggerConfig implements PeriodicJobTrigger {
+export class PeriodicJobTriggerConfig extends JobTriggerConfigBase implements PeriodicJobTrigger {
   @ConfigProperty({type: JobTriggerType})
   readonly type = JobTriggerType.periodic;
   @ConfigProperty({type: 'unsignedInt', max: 7})
   periodicity: number | undefined = 7; // 0-6: week days 7 every day
   @ConfigProperty({type: 'unsignedInt', max: 23 * 60 + 59})
-  atTime: number | undefined = 0; // day time
+  atTime: number | undefined = 0; // daytime
 }
 
 @SubConfigClass({softReadonly: true})
-export class AfterJobTriggerConfig implements AfterJobTrigger {
+export class AfterJobTriggerConfig extends JobTriggerConfigBase implements AfterJobTrigger {
   @ConfigProperty({type: JobTriggerType})
   readonly type = JobTriggerType.after;
   @ConfigProperty()
   afterScheduleName: string | undefined; // runs after schedule
 
   constructor(afterScheduleName?: string) {
+    super();
     this.afterScheduleName = afterScheduleName;
   }
 }
@@ -578,7 +771,7 @@ export class JobScheduleConfig implements JobScheduleDTO {
   @ConfigProperty()
   allowParallelRun: boolean = false;
   @ConfigProperty({
-    type: NeverJobTriggerConfig,
+    type: JobTriggerConfigBase,
     typeBuilder: (v: JobTrigger) => {
       const type = typeof v.type === 'number' ? v.type : JobTriggerType[v.type];
       switch (type) {
@@ -830,8 +1023,9 @@ export class ServerAlbumCoverConfig {
   })
   SearchQuery: SearchQueryDTO = {
     type: SearchQueryTypes.any_text,
-    text: '',
+    value: '',
   } as TextSearch;
+
   @ConfigProperty({
     arrayType: ClientSortingConfig,
     tags: {
@@ -839,7 +1033,14 @@ export class ServerAlbumCoverConfig {
       uiResetNeeded: {db: true},
       priority: ConfigPriority.advanced
     },
-    description: $localize`If multiple cover is available sorts them by these methods and selects the first one.`,
+    constraint: {
+      assert: (v: ClientSortingConfig[], c: ServerConfig) => {
+        // random should stand on its own
+        return !Array.isArray(v) || v.filter((s) => s.method == SortByTypes.Random).length == 0 || v.length == 1;
+      },
+      assertReason: 'Albums.Cover.Sorting config error: Random should stand on its own. You can\'t combine random with other sorting methods.',
+    },
+    description: $localize`If multiple cover is available sorts them by these methods and selects the first one. Using random sorting does not allow to use any other sorting method.`,
   })
   Sorting: ClientSortingConfig[] = [
     new ClientSortingConfig(SortByTypes.Rating, false),
@@ -872,19 +1073,6 @@ export class ServerMediaConfig extends ClientMediaConfig {
     description: $localize`Thumbnails, converted photos, videos will be stored here (write permission required)`,
   })
   tempFolder: string = 'demo/tmp';
-
-  @ConfigProperty({
-    type: 'unsignedInt',
-    tags: {
-      name: $localize`Metadata read buffer`,
-      priority: ConfigPriority.underTheHood,
-      uiResetNeeded: {db: true, server: true},
-      githubIssue: 398,
-      unit: 'bytes'
-    } as TAGS,
-    description: $localize`Only this many bites will be loaded when scanning photo/video for metadata. Increase this number if your photos shows up as square.`,
-  })
-  photoMetadataSize: number = 512 * 1024; // only this many bites will be loaded when scanning photo for metadata
 
   @ConfigProperty({
     tags: {
@@ -932,6 +1120,16 @@ export class ServerServiceConfig extends ClientServiceConfig {
     description: $localize`Users kept logged in for this long time.`,
   })
   sessionTimeout: number = 1000 * 60 * 60 * 24 * 7; // in ms
+
+  @ConfigProperty({
+    tags: {
+      name: $localize`Trust Proxy`,
+      priority: ConfigPriority.underTheHood,
+      githubIssue: 1014
+    },
+    description: $localize`Should the backend trust proxies to extract remote Client IP. See express docs, for valid values: https://expressjs.com/en/guide/behind-proxies.html`,
+  })
+  trustProxy: string = 'false';
 
   @ConfigProperty({
     tags: {
@@ -1090,7 +1288,7 @@ export class ServerConfig extends ClientConfig {
   @ConfigProperty({
     tags: {
       name: $localize`Extensions`,
-      uiIcon: 'ionCloudOutline'
+      uiIcon: 'ionExtensionPuzzleOutline'
     } as TAGS,
   })
   Extensions: ServerExtensionsConfig = new ServerExtensionsConfig();

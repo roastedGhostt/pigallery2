@@ -9,6 +9,8 @@ on:
       - '**'
     tags:
       - '*.*'
+  workflow_dispatch:
+
 
 jobs:
   test:
@@ -16,7 +18,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x]
+        node-version: [22.x]
     steps:
     - uses: getong/mariadb-action@v1.11
       with:
@@ -66,7 +68,7 @@ jobs:
       with:
         start: npm run start-e2e-server
       # after the test run completes store screenshots
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: failure() # Store screenshots only on failures
       with:
          name: cypress-screenshots
@@ -75,7 +77,6 @@ jobs:
 
   create-release:
     runs-on: [ubuntu-latest]
-    needs: [test]
     steps:
       -
         name: Checkout
@@ -84,7 +85,7 @@ jobs:
         name: Setup Node.js for use with actions
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
       -
         name: Install Deps
         run: npm install --unsafe-perm
@@ -97,17 +98,15 @@ jobs:
           path: release
   build-dockerx:
     runs-on: [ ubuntu-latest ]
-    needs: [ create-release ]
+    needs: [ test, create-release ]
     strategy:
       matrix:
-        container: [alpine,  debian-bullseye, debian-bookworm ]
+        container: [alpine,  debian-trixie ]
         include:
           - container: alpine
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
-          - container: debian-bullseye
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
-          - container: debian-bookworm
-            platforms: linux/amd64,linux/arm64,linux/arm/v7
+            platforms: linux/amd64,linux/arm64, linux/arm/v7
+          - container: debian-trixie
+            platforms: linux/amd64,linux/arm64
 
     steps:
       - name: Checkout
@@ -139,19 +138,30 @@ jobs:
           file: docker/${{ matrix.container }}/Dockerfile.build
           platforms: ${{ matrix.platforms }}
           push: true
-          tags: bpatrik/pigallery2:experimental-${{ matrix.container }}
-      - name: Push edge on new master commit
+          tags: ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:experimental-${{ matrix.container }}
+      - name: Push secondary edge builds on new master commit
         # github.ref:  branches the format is refs/heads/<branch_name>  PRs and Tags are different
-        if: ${{github.ref == 'refs/heads/master' }}
+        if: ${{github.ref == 'refs/heads/master' &&  matrix.container != 'debian-trixie'}}
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/${{ matrix.container }}/Dockerfile.build
           platforms: ${{ matrix.platforms }}
           push: true
-          tags: bpatrik/pigallery2:edge-${{ matrix.container }}
+          tags: ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:edge-${{ matrix.container }}
+      - name: Push main edge build on new master commit
+        if: ${{github.ref == 'refs/heads/master' &&  matrix.container == 'debian-trixie'}}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/${{ matrix.container }}/Dockerfile.build
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:edge
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:edge-${{ matrix.container }}
       - name: Push release on new Tag
-        if: ${{ startsWith(github.ref_type , 'tag') &&  !github.event.issue.pull_request &&  matrix.container != 'debian-bookworm'}}
+        if: ${{ startsWith(github.ref_type , 'tag') &&  !github.event.issue.pull_request &&  matrix.container != 'debian-trixie'}}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -159,11 +169,11 @@ jobs:
           platforms: ${{ matrix.platforms }}
           push: true
           tags: |
-            bpatrik/pigallery2:edge-${{ matrix.container }}
-            bpatrik/pigallery2:${{ github.ref_name }}-${{ matrix.container }}
-            bpatrik/pigallery2:latest-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:edge-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:${{ github.ref_name }}-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:latest-${{ matrix.container }}
       - name: Push latest on new Tag
-        if: ${{ startsWith(github.ref_type, 'tag') &&  !github.event.issue.pull_request &&  matrix.container == 'debian-bookworm'}}
+        if: ${{ startsWith(github.ref_type, 'tag') &&  !github.event.issue.pull_request &&  matrix.container == 'debian-trixie'}}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -171,8 +181,8 @@ jobs:
           platforms: ${{ matrix.platforms }}
           push: true
           tags: |
-            bpatrik/pigallery2:edge-${{ matrix.container }}
-            bpatrik/pigallery2:${{ github.ref_name }}-${{ matrix.container }}
-            bpatrik/pigallery2:latest-${{ matrix.container }}
-            bpatrik/pigallery2:${{ github.ref_name }}
-            bpatrik/pigallery2:latest
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:edge-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:${{ github.ref_name }}-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:latest-${{ matrix.container }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:${{ github.ref_name }}
+            ${{ secrets.REGISTRY_NAMESPACE }}/pigallery2:latest
