@@ -16,7 +16,7 @@
     "test": "ng test  && nyc mocha --recursive test --exclude test/cypress/**/*.js",
     "test-backend": "tsc && mocha --recursive test --exclude test/cypress/**/*.js",
     "coverage": "nyc report --reporter=lcov",
-    "start": "node ./src/backend/index",
+    "start": "node --max-old-space-size=8192 ./src/backend/index",
     "run-dev": "ng build  --configuration=dev",
     "build-stats": "ng build  --stats-json",
     "analyze": "webpack-bundle-analyzer dist/en/stats.json",
