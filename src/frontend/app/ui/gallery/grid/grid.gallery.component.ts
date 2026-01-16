@@ -405,7 +405,8 @@ export class GalleryGridComponent
   }
 
   private getMaxRowHeight(): number {
-    return this.screenHeight / this.MIN_ROW_COUNT;
+    const rowCount = this.screenHeight > this.containerWidth ? 0 : this.MIN_ROW_COUNT;
+    return this.screenHeight / rowCount;
   }
 
   /**
